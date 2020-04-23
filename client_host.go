@@ -418,15 +418,11 @@ func (c *HostClient) cleanupIdleConnections() {
 		// Stop this cleaning goroutine if no connections are left.
 
 		c.mu.Lock()
-
 		mustStop := c.count == 0
-		if mustStop {
-			c.cleanerRunning = false
-		}
-
 		c.mu.Unlock()
 
 		if mustStop {
+			c.cleanerRunning = false
 			break
 		}
 
