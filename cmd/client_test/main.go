@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/lithdew/sleepy"
 	"time"
 )
@@ -11,14 +12,18 @@ func main() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	req := sleepy.AcquireRequest()
-	defer sleepy.ReleaseRequest(req)
+	f := sleepy.AcquireFrame()
+	defer sleepy.ReleaseFrame(f)
 
-	req.Addr = "127.0.0.1:4444"
+	f.SetAddr("127.0.0.1:4444")
+	f.SetBody([]byte("hello\n"))
 
 	for range ticker.C {
-		if err := client.Do(req, nil); err != nil {
+		res, err := client.Do(nil, f)
+		if err != nil {
 			panic(err)
 		}
+
+		fmt.Println(string(res[:len(res)-1]))
 	}
 }

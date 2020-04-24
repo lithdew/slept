@@ -62,7 +62,7 @@ func (c *HostClient) LastUseTime() time.Time {
 	return time.Unix(startTimeUnix+int64(atomic.LoadUint32(&c.lastUseTime)), 0)
 }
 
-func (c *HostClient) Do(req *Request, res *Response) error {
+func (c *HostClient) Do(dst []byte, req *Frame) ([]byte, error) {
 	var (
 		err   error
 		retry bool
@@ -79,7 +79,7 @@ func (c *HostClient) Do(req *Request, res *Response) error {
 	// connection that the request was being delivered on was closed.
 
 	for attempts := 0; attempts < maxAttempts; maxAttempts++ {
-		retry, err = c.do(req, res)
+		dst, retry, err = c.do(dst, req)
 		if err == nil || !retry {
 			break
 		}
@@ -95,20 +95,15 @@ func (c *HostClient) Do(req *Request, res *Response) error {
 		err = ErrConnectionClosed
 	}
 
-	return err
+	return dst, err
 }
 
-func (c *HostClient) do(req *Request, res *Response) (bool, error) {
-	if res == nil {
-		res = AcquireResponse()
-		defer ReleaseResponse(res)
-	}
-
+func (c *HostClient) do(dst []byte, req *Frame) ([]byte, bool, error) {
 	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
 
 	cc, err := c.tryAcquireClientConn(req.Timeout)
 	if err != nil {
-		return false, err
+		return dst, false, err
 	}
 
 	conn := cc.conn
@@ -118,7 +113,7 @@ func (c *HostClient) do(req *Request, res *Response) (bool, error) {
 	if c.WriteTimeout > 0 {
 		if err = conn.SetWriteDeadline(time.Now().Add(c.WriteTimeout)); err != nil {
 			c.destroyClientConn(cc)
-			return true, err
+			return dst, true, err
 		}
 	}
 
@@ -133,7 +128,7 @@ func (c *HostClient) do(req *Request, res *Response) (bool, error) {
 	if err != nil {
 		c.releaseWriter(bw)
 		c.destroyClientConn(cc)
-		return true, err
+		return dst, true, err
 	}
 	c.releaseWriter(bw)
 
@@ -142,18 +137,23 @@ func (c *HostClient) do(req *Request, res *Response) (bool, error) {
 	if c.ReadTimeout > 0 {
 		if err = conn.SetReadDeadline(time.Now().Add(c.ReadTimeout)); err != nil {
 			c.destroyClientConn(cc)
-			return true, err
+			return dst, true, err
 		}
 	}
 
 	// TODO(kenta): read response data.
 
 	br := c.acquireReader(conn)
+	if dst, err = br.ReadSlice('\n'); err != nil {
+		c.releaseReader(br)
+		c.destroyClientConn(cc)
+		return dst, false, err
+	}
 	c.releaseReader(br)
 
 	c.tryRecycleClientConn(cc)
 
-	return false, err
+	return dst, false, err
 }
 
 func (c *HostClient) queueWaitingCaller(caller *waitingCaller) {

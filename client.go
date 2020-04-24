@@ -44,8 +44,8 @@ type Client struct {
 	clients map[string]*HostClient
 }
 
-func (c *Client) Do(req *Request, res *Response) error {
-	addr, startCleaner := req.Addr, false
+func (c *Client) Do(dst []byte, req *Frame) ([]byte, error) {
+	addr, startCleaner := req.addr, false
 
 	c.mu.Lock()
 
@@ -91,7 +91,7 @@ func (c *Client) Do(req *Request, res *Response) error {
 		go c.cleanupIdleClients(clients)
 	}
 
-	return client.Do(req, res)
+	return client.Do(dst, req)
 }
 
 func (c *Client) cleanupIdleClients(clients map[string]*HostClient) {
