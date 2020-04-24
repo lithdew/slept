@@ -1,8 +1,10 @@
 package sleepy
 
 import (
+	"bufio"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +44,9 @@ type HostClient struct {
 	// Whether or not cleanupIdleConnections() is running in the background.
 	cleanerRunning bool
 
+	readerPool sync.Pool
+	writerPool sync.Pool
+
 	// Total number of pending concurrent requests.
 	pendingRequests int32
 
@@ -79,7 +84,7 @@ func (c *HostClient) Do(req *Request, res *Response) error {
 			break
 		}
 
-		if !req.Idempotent && err != io.EOF {
+		if !req.Idempotent && errors.Is(err, io.EOF) {
 			break
 		}
 	}
@@ -108,6 +113,8 @@ func (c *HostClient) do(req *Request, res *Response) (bool, error) {
 
 	conn := cc.conn
 
+	// Set write timeout.
+
 	if c.WriteTimeout > 0 {
 		if err = conn.SetWriteDeadline(time.Now().Add(c.WriteTimeout)); err != nil {
 			c.destroyClientConn(cc)
@@ -115,7 +122,22 @@ func (c *HostClient) do(req *Request, res *Response) (bool, error) {
 		}
 	}
 
-	// TODO(kenta): write request data here.
+	// Write request data.
+
+	bw := c.acquireWriter(conn)
+
+	err = req.WriteTo(bw)
+	if err == nil {
+		err = bw.Flush()
+	}
+	if err != nil {
+		c.releaseWriter(bw)
+		c.destroyClientConn(cc)
+		return true, err
+	}
+	c.releaseWriter(bw)
+
+	// Set read timeout.
 
 	if c.ReadTimeout > 0 {
 		if err = conn.SetReadDeadline(time.Now().Add(c.ReadTimeout)); err != nil {
@@ -124,7 +146,10 @@ func (c *HostClient) do(req *Request, res *Response) (bool, error) {
 		}
 	}
 
-	// TODO(kenta): read response data here.
+	// TODO(kenta): read response data.
+
+	br := c.acquireReader(conn)
+	c.releaseReader(br)
 
 	c.tryRecycleClientConn(cc)
 
@@ -359,6 +384,42 @@ func (c *HostClient) destroyClientConn(cc *clientConn) {
 
 	// Release resources.
 	releaseClientConn(cc)
+}
+
+func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
+	v := c.writerPool.Get()
+	if v == nil {
+		n := c.WriteBufferSize
+		if n <= 0 {
+			n = DefaultWriteBufferSize
+		}
+		return bufio.NewWriterSize(conn, n)
+	}
+	bw := v.(*bufio.Writer)
+	bw.Reset(conn)
+	return bw
+}
+
+func (c *HostClient) releaseWriter(bw *bufio.Writer) {
+	c.writerPool.Put(bw)
+}
+
+func (c *HostClient) acquireReader(conn net.Conn) *bufio.Reader {
+	v := c.readerPool.Get()
+	if v == nil {
+		n := c.ReadBufferSize
+		if n <= 0 {
+			n = DefaultReadBufferSize
+		}
+		return bufio.NewReaderSize(conn, n)
+	}
+	br := v.(*bufio.Reader)
+	br.Reset(conn)
+	return br
+}
+
+func (c *HostClient) releaseReader(br *bufio.Reader) {
+	c.readerPool.Put(br)
 }
 
 func (c *HostClient) cleanupIdleConnections() {

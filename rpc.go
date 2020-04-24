@@ -1,6 +1,7 @@
 package sleepy
 
 import (
+	"io"
 	"sync"
 	"time"
 )
@@ -14,6 +15,11 @@ type Request struct {
 
 	// Total duration to wait for until we consider this request to have timed out.
 	Timeout time.Duration
+}
+
+func (r *Request) WriteTo(dst io.Writer) error {
+	_, err := dst.Write([]byte("hello\n"))
+	return err
 }
 
 func (r *Request) Reset() {

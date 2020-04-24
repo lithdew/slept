@@ -10,6 +10,9 @@ const (
 	DefaultMaxConnsPerHost           = 512
 	DefaultMaxIdleConnDuration       = 10 * time.Second
 	DefaultMaxIdempotentCallAttempts = 5
+
+	DefaultReadBufferSize  = 4096
+	DefaultWriteBufferSize = 4096
 )
 
 var (
