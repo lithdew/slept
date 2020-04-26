@@ -6,11 +6,10 @@ import (
 	"github.com/valyala/bytebufferpool"
 	"io"
 	"math"
-	"net"
 )
 
 type Conn interface {
-	WriteTo(buf []byte, addr net.Addr) (int, error)
+	Write(buf []byte) (int, error)
 }
 
 type Endpoint struct {
@@ -34,7 +33,7 @@ type Endpoint struct {
 	pool bytebufferpool.Pool
 }
 
-func NewEndpoint() *Endpoint {
+func NewEndpoint(conn Conn) *Endpoint {
 	e := &Endpoint{
 		FragmentAbove:      1024,
 		FragmentSize:       1024,
@@ -42,6 +41,8 @@ func NewEndpoint() *Endpoint {
 		MaxPacketSize:      16 * 1024,
 		PacketHeaderSize:   20,
 		RTTSmoothingFactor: .0025,
+
+		conn: conn,
 
 		sent:      NewSentPacketBuffer(256),
 		recv:      NewRecvPacketBuffer(256),
@@ -51,7 +52,7 @@ func NewEndpoint() *Endpoint {
 	return e
 }
 
-func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
+func (e *Endpoint) SendPacket(buf []byte) (int, error) {
 	seq, written, size := e.seq, 0, uint(len(buf))
 
 	if size > e.MaxPacketSize {
@@ -102,7 +103,7 @@ func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
 		written += copy(scratch.B[written:], buf)
 
 		// Write to the connection all data written to the scratch buffer.
-		return e.conn.WriteTo(scratch.B[:written], addr)
+		return e.conn.Write(scratch.B[:written])
 	}
 
 	// Figure out how many fragments we need to partition our data into.
@@ -143,7 +144,7 @@ func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
 
 		// Write the fragment to the connection.
 
-		n, err := e.conn.WriteTo(scratch.B, addr)
+		n, err := e.conn.Write(scratch.B)
 		if err != nil {
 			return written + n, fmt.Errorf("failed to write fragment %d: %w", id, err)
 		}

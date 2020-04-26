@@ -3,7 +3,6 @@ package sleepy
 import (
 	"github.com/stretchr/testify/require"
 	"math/rand"
-	"net"
 	"testing"
 	"time"
 )
@@ -14,7 +13,7 @@ type MockConn struct {
 	buf [][]byte
 }
 
-func (c *MockConn) WriteTo(b []byte, _ net.Addr) (int, error) {
+func (c *MockConn) Write(b []byte) (int, error) {
 	c.buf = append(c.buf, make([]byte, len(b)))
 	return copy(c.buf[len(c.buf)-1], b), nil
 }
@@ -22,12 +21,8 @@ func (c *MockConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 func newTestEndpoint(t *testing.T) (*Endpoint, *MockConn) {
 	t.Helper()
 
-	conn := new(MockConn)
-
-	endpoint := NewEndpoint()
-	endpoint.conn = conn
-
-	return endpoint, conn
+	endpoint := NewEndpoint(new(MockConn))
+	return endpoint, endpoint.conn.(*MockConn)
 }
 
 func TestEndpointSendRecvCompactPacket(t *testing.T) {
@@ -40,7 +35,7 @@ func TestEndpointSendRecvCompactPacket(t *testing.T) {
 
 	// Have client send data.
 
-	_, err = client.SendPacket(data, nil)
+	_, err = client.SendPacket(data)
 
 	require.NoError(t, err)
 	require.Len(t, clientConn.buf, 1)
@@ -58,7 +53,7 @@ func TestEndpointSendRecvCompactPacket(t *testing.T) {
 
 	// Have server send data.
 
-	_, err = server.SendPacket(data, nil)
+	_, err = server.SendPacket(data)
 
 	require.NoError(t, err)
 	require.Len(t, serverConn.buf, 1)
@@ -106,7 +101,7 @@ func TestEndpointSendRecvFragmentedPacket(t *testing.T) {
 	_, err = src.Read(data)
 	require.NoError(t, err)
 
-	_, err = client.SendPacket(data, nil)
+	_, err = client.SendPacket(data)
 
 	require.NoError(t, err)
 	require.Len(t, clientConn.buf, int(client.MaxFragments))

@@ -1,27 +1,84 @@
 package main
 
 import (
-	"bufio"
+	"crypto/rand"
+	"flag"
+	"github.com/lithdew/sleepy"
+	"log"
+	"math"
 	"net"
-	"strconv"
+	"time"
 )
 
-func main() {
-	conn, err := net.Dial("udp", "127.0.0.1:4444")
+func check(err error) {
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	defer conn.Close()
+}
 
-	bw := bufio.NewWriterSize(conn, 1500)
+func endpointRecv(e *sleepy.Endpoint, conn net.PacketConn) {
+	buf := make([]byte, math.MaxUint16)
 
-	for i := 0; i < 100000; i++ {
-		if _, err := bw.WriteString(strconv.FormatUint(uint64(i), 10) + "\n"); err != nil {
-			panic(err)
-		}
+	for {
+		n, _, err := conn.ReadFrom(buf[:])
+		check(err)
+
+		check(e.RecvPacket(buf[:n]))
+
+		log.Printf("recv %d byte(s)", n)
 	}
+}
 
-	if err := bw.Flush(); err != nil {
-		panic(err)
+var client bool
+
+func runClient(addr *net.UDPAddr) {
+	conn, err := net.DialUDP("udp", nil, addr)
+	check(err)
+	defer func() {
+		check(conn.Close())
+	}()
+
+	e := sleepy.NewEndpoint(conn)
+	go endpointRecv(e, conn)
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	buf := make([]byte, 4096)
+
+	for range ticker.C {
+		_, err = rand.Read(buf)
+		check(err)
+
+		_, err = e.SendPacket(buf)
+
+		log.Printf("sent %d byte(s)", len(buf))
+	}
+}
+
+func runServer(addr *net.UDPAddr) {
+	conn, err := net.ListenUDP("udp", addr)
+	check(err)
+	defer func() {
+		check(conn.Close())
+	}()
+
+	e := sleepy.NewEndpoint(conn)
+	endpointRecv(e, conn)
+}
+
+func main() {
+	flag.BoolVar(&client, "client", false, "client mode")
+	flag.Parse()
+
+	addr, err := net.ResolveUDPAddr("udp", ":4444")
+	check(err)
+
+	if client {
+		log.Println("running as client")
+		runClient(addr)
+	} else {
+		log.Println("running as server")
+		runServer(addr)
 	}
 }
