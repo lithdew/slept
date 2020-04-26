@@ -26,5 +26,5 @@ This is currently a work in progress, though the goal is to build a robust, high
 
 As a reference, I have been reading code from:
 
-1. The original reference reliable.io C implementation [networkprotocol/reliable.io](https://github.com/networkprotocol/reliable.io).
-2. An unoptimized reliable.io Go implementation, which appears to be a direct translation of the original reference C implementation [jakecoffman/rely](github.com/jakecoffman/rely).
+1. The original reference reliable.io C implementation: [networkprotocol/reliable.io](https://github.com/networkprotocol/reliable.io)
+2. An unoptimized reliable.io Go implementation, which appears to be a direct translation of the original reference C implementation: [jakecoffman/rely](https://github.com/jakecoffman/rely)
