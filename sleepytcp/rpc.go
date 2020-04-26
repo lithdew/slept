@@ -1,4 +1,4 @@
-package sleepy
+package sleepytcp
 
 import (
 	"bufio"

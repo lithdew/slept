@@ -1,8 +1,9 @@
-package sleepy
+package sleepytcp
 
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -144,11 +145,11 @@ func (c *HostClient) do(dst []byte, req *Frame) ([]byte, bool, error) {
 	// TODO(kenta): read response data.
 
 	br := c.acquireReader(conn)
-	if dst, err = br.ReadSlice('\n'); err != nil {
-		c.releaseReader(br)
-		c.destroyClientConn(cc)
-		return dst, false, err
-	}
+	//if dst, err = br.ReadSlice('\n'); err != nil {
+	//	c.releaseReader(br)
+	//	c.destroyClientConn(cc)
+	//	return dst, false, err
+	//}
 	c.releaseReader(br)
 
 	c.tryRecycleClientConn(cc)
@@ -262,6 +263,8 @@ func (c *HostClient) tryAcquireClientConn(timeout time.Duration) (cc *clientConn
 	if startCleaner {
 		go c.cleanupIdleConnections()
 	}
+
+	fmt.Println("dialing...")
 
 	// Initialize the connection.
 

@@ -2,18 +2,18 @@ package main
 
 import (
 	"fmt"
-	"github.com/lithdew/sleepy"
+	"github.com/lithdew/sleepy/sleepytcp"
 	"time"
 )
 
 func main() {
-	var client sleepy.Client
+	var client sleepytcp.Client
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	f := sleepy.AcquireFrame()
-	defer sleepy.ReleaseFrame(f)
+	f := sleepytcp.AcquireFrame()
+	defer sleepytcp.ReleaseFrame(f)
 
 	f.SetAddr("127.0.0.1:4444")
 	f.SetBody([]byte("hello\n"))
@@ -24,6 +24,8 @@ func main() {
 			panic(err)
 		}
 
-		fmt.Println(string(res[:len(res)-1]))
+		if len(res) != 0 {
+			fmt.Println(string(res[:len(res)-1]))
+		}
 	}
 }
