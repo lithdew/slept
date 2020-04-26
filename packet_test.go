@@ -26,7 +26,7 @@ func TestEncodeDecodeFragmentHeader(t *testing.T) {
 	buf := bytebufferpool.Get()
 	defer bytebufferpool.Put(buf)
 
-	f := func(seq uint16, id, total byte) bool {
+	f := func(seq uint16, id, total uint8) bool {
 		header := FragmentHeader{seq: seq, id: id, total: total}
 		recovered, leftover, err := UnmarshalFragmentHeader(header.AppendTo(buf.B[:0]))
 		return assert.NoError(t, err) && assert.Len(t, leftover, 0) && assert.EqualValues(t, header, recovered)

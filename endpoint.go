@@ -14,11 +14,11 @@ type Conn interface {
 }
 
 type Endpoint struct {
-	FragmentAbove      int
-	FragmentSize       int
-	MaxFragments       byte
-	MaxPacketSize      int
-	PacketHeaderSize   int
+	FragmentAbove      uint
+	FragmentSize       uint
+	MaxFragments       uint
+	MaxPacketSize      uint
+	PacketHeaderSize   uint
 	RTTSmoothingFactor float64
 
 	conn Conn
@@ -52,7 +52,7 @@ func NewEndpoint() *Endpoint {
 }
 
 func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
-	seq, written, size := e.seq, 0, len(buf)
+	seq, written, size := e.seq, 0, uint(len(buf))
 
 	if size > e.MaxPacketSize {
 		return 0, fmt.Errorf("packet is too large: size is %d, but max is %d", size, e.MaxPacketSize)
@@ -95,7 +95,7 @@ func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
 
 	if size <= e.FragmentAbove {
 		// Allocate enough space for the packet header and the packets data.
-		scratch.B = bytesutil.ExtendSlice(scratch.B, MaxPacketHeaderSize+size)
+		scratch.B = bytesutil.ExtendSlice(scratch.B, int(MaxPacketHeaderSize+size))
 
 		// Write down the packet header, and copy the packets data into the rest of the scratch buffer.
 		written = len(header.AppendTo(scratch.B[:0]))
@@ -107,25 +107,23 @@ func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
 
 	// Figure out how many fragments we need to partition our data into.
 
-	total := uint8(size / e.FragmentSize)
+	total := size / e.FragmentSize
 	if size%e.FragmentSize != 0 {
 		total++
 	}
 
-	// Allocate enough space for the fragment header, the packet header, and the fragments data.
-	scratch.B = bytesutil.ExtendSlice(scratch.B[:0], FragmentHeaderSize+MaxPacketHeaderSize+e.FragmentSize)
+	// Generate fragment header.
+	fh := FragmentHeader{seq: header.seq, total: uint8(total - 1)}
 
-	for id := uint8(0); id < total; id++ {
+	// Allocate enough space for the fragment header, the packet header, and the fragments data.
+	scratch.B = bytesutil.ExtendSlice(scratch.B[:0], int(FragmentHeaderSize+MaxPacketHeaderSize+e.FragmentSize))
+
+	for id := uint(0); id < total; id++ {
 		scratch.B = scratch.B[:0]
 
 		// Write fragment header.
 
-		fh := FragmentHeader{
-			seq:   header.seq,
-			id:    id,
-			total: total,
-		}
-
+		fh.id = uint8(id)
 		scratch.B = fh.AppendTo(scratch.B)
 
 		// For the first fragment, write the packet header.
@@ -136,7 +134,7 @@ func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
 
 		// Write the fragments data, capped at most FragmentSize bytes.
 
-		cutoff := len(buf)
+		cutoff := uint(len(buf))
 		if cutoff > e.FragmentSize {
 			cutoff = e.FragmentSize
 		}
@@ -224,32 +222,30 @@ func (e *Endpoint) recvFragmentedPacket(buf []byte) error {
 		}
 		entry.Reset()
 
-		entry.total = header.total
+		entry.total = uint(header.total) + 1
 
 		// Instantiate a scratch buffer of max packet byte capacity that is to be used for assembling together incoming
 		// fragment partitions.
 
 		entry.buf = e.pool.Get()
-		entry.buf.B = bytesutil.ExtendSlice(entry.buf.B[:0], MaxPacketHeaderSize+int(header.total)*e.FragmentSize)
+		entry.buf.B = bytesutil.ExtendSlice(entry.buf.B[:0], int(MaxPacketHeaderSize+entry.total*e.FragmentSize))
 	}
 
 	// Assert that the total fragment count is what is expected, and that the specific fragment we received by its
 	// ID has not been marked to have been received before.
 
-	if header.total != entry.total {
-		return fmt.Errorf("got invalid fragment: fragment count mismatch (expected %d, got %d)",
+	if uint(header.total)+1 != entry.total {
+		return fmt.Errorf("got invalid fragment: total fragment count mismatch (expected %d, got %d)",
 			entry.total,
-			header.total,
+			uint(header.total)+1,
 		)
 	}
 
 	// If we have not yet received this particular fragment ID, mark that we have received it.
 
-	if entry.marked[header.id] {
-		return fmt.Errorf("ignoring fragment: fragment %d was already received", header.id)
+	if err := entry.MarkReceived(header.id); err != nil {
+		return err
 	}
-
-	entry.marked[header.id] = true
 
 	// Leaves a gap in the front of the buffer that is to be removed once the fragment is fully assembled should
 	// we have received the first fragment which contains the packet header. If we received the last fragment, we
@@ -257,14 +253,14 @@ func (e *Endpoint) recvFragmentedPacket(buf []byte) error {
 	// into the assemblers scratch buffer.
 
 	if header.id == 0 {
-		entry.headerSize = copy(entry.buf.B[MaxPacketHeaderSize-len(phb):], phb)
+		entry.headerSize = uint(copy(entry.buf.B[MaxPacketHeaderSize-uint(len(phb)):], phb))
 	}
 
-	if header.id == header.total-1 {
-		entry.packetSize = int(header.total-1)*e.FragmentSize + len(buf)
+	if header.id == header.total {
+		entry.packetSize = uint(header.total)*e.FragmentSize + uint(len(buf))
 	}
 
-	copy(entry.buf.B[MaxPacketHeaderSize+int(header.id)*e.FragmentSize:], buf)
+	copy(entry.buf.B[MaxPacketHeaderSize+uint(header.id)*e.FragmentSize:], buf)
 
 	// Increment the number of fragment partitions we have received. If we have received all the fragments, assemble
 	// it together in one packet and process it as a compact, non-fragmented packet.
@@ -309,7 +305,7 @@ func (e *Endpoint) recvCompactPacket(buf []byte) error {
 
 	recv.Reset()
 	recv.time = e.time
-	recv.size = e.PacketHeaderSize + len(buf)
+	recv.size = e.PacketHeaderSize + uint(len(buf))
 
 	// Mark new ACKs from our peer.
 

@@ -5,19 +5,18 @@ import (
 	"github.com/lithdew/bytesutil"
 	"github.com/valyala/bytebufferpool"
 	"io"
-	"math"
 	"math/bits"
 )
 
 const (
-	MaxPacketHeaderSize = 9
-	FragmentHeaderSize  = 5
+	MaxPacketHeaderSize = uint(9)
+	FragmentHeaderSize  = uint(5)
 )
 
 type SentPacket struct {
 	time  float64
 	acked bool
-	size  int
+	size  uint
 }
 
 func (p *SentPacket) Reset() {
@@ -26,7 +25,7 @@ func (p *SentPacket) Reset() {
 
 type RecvPacket struct {
 	time float64
-	size int
+	size uint
 }
 
 func (p *RecvPacket) Reset() {
@@ -186,15 +185,24 @@ func UnmarshalPacketHeader(buf []byte) (header PacketHeader, leftover []byte, er
 }
 
 type Fragment struct {
-	recv  byte
-	total byte
+	recv  uint
+	total uint
 
 	buf *bytebufferpool.ByteBuffer
 
-	headerSize int
-	packetSize int
+	headerSize uint
+	packetSize uint
 
-	marked [math.MaxUint8]bool
+	marked [4]uint64
+}
+
+func (f *Fragment) MarkReceived(id byte) error {
+	idx, pos := id>>6, uint64(1<<(id&63))
+	if f.marked[idx]&pos != 0 {
+		return fmt.Errorf("ignoring fragment: fragment %d was already received", id)
+	}
+	f.marked[idx] |= pos
+	return nil
 }
 
 func (f *Fragment) Reset() {
@@ -207,7 +215,7 @@ type FragmentHeader struct {
 	total uint8
 }
 
-func (f FragmentHeader) Validate(maxFragments uint8) error {
+func (f FragmentHeader) Validate(maxFragments uint) error {
 	if f.id > f.total {
 		return fmt.Errorf("fragment id > total num fragments (fragment id: %d, total num fragments: %d)",
 			f.id,
@@ -215,7 +223,7 @@ func (f FragmentHeader) Validate(maxFragments uint8) error {
 		)
 	}
 
-	if f.total > maxFragments {
+	if uint(f.total)+1 > maxFragments {
 		return fmt.Errorf("max amount of fragments a packet can be partitioned into is %d, but got %d fragment(s)",
 			f.total,
 			maxFragments,
@@ -228,12 +236,12 @@ func (f FragmentHeader) Validate(maxFragments uint8) error {
 func (f FragmentHeader) AppendTo(dst []byte) []byte {
 	dst = FlagFragment.AppendTo(dst)
 	dst = bytesutil.AppendUint16BE(dst, f.seq)
-	dst = append(dst, f.id, f.total-1)
+	dst = append(dst, f.id, f.total)
 	return dst
 }
 
 func UnmarshalFragmentHeader(buf []byte) (header FragmentHeader, leftover []byte, err error) {
-	if len(buf) < FragmentHeaderSize {
+	if uint(len(buf)) < FragmentHeaderSize {
 		return header, buf, fmt.Errorf("got %d byte(s), expected at least %d byte(s): %w",
 			len(buf),
 			FragmentHeaderSize,
@@ -245,7 +253,7 @@ func UnmarshalFragmentHeader(buf []byte) (header FragmentHeader, leftover []byte
 
 	header.seq, buf = bytesutil.Uint16BE(buf[0:2]), buf[2:]
 	header.id, buf = buf[0], buf[1:]
-	header.total, buf = buf[0]+1, buf[1:]
+	header.total, buf = buf[0], buf[1:]
 
 	return header, buf, nil
 }
