@@ -17,6 +17,7 @@ type Endpoint struct {
 	FragmentAbove      int
 	FragmentSize       int
 	MaxFragments       byte
+	MaxPacketSize      int
 	PacketHeaderSize   int
 	RTTSmoothingFactor float64
 
@@ -38,6 +39,7 @@ func NewEndpoint() *Endpoint {
 		FragmentAbove:      1024,
 		FragmentSize:       1024,
 		MaxFragments:       16,
+		MaxPacketSize:      16 * 1024,
 		PacketHeaderSize:   20,
 		RTTSmoothingFactor: .0025,
 
@@ -51,6 +53,10 @@ func NewEndpoint() *Endpoint {
 
 func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
 	seq, written, size := e.seq, 0, len(buf)
+
+	if size > e.MaxPacketSize {
+		return 0, fmt.Errorf("packet is too large: size is %d, but max is %d", size, e.MaxPacketSize)
+	}
 
 	// Increment the last sent sequence number for the next packet.
 
