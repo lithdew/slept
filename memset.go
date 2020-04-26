@@ -5,7 +5,7 @@ import "math"
 const EmptySequenceBufferEntry = math.MaxUint32
 
 // A cache of EmptySequenceBufferEntry's that may be copied into slices to clear out entries.
-var emptySequenceBufferEntryCache [4096]uint32
+var emptySequenceBufferEntryCache [math.MaxUint16]uint32
 
 func init() {
 	for i := range emptySequenceBufferEntryCache {
