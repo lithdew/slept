@@ -160,7 +160,7 @@ func (e *Endpoint) RecvPacket(buf []byte) error {
 	// If the first bit is set, process the packet as a fragmented packet. Otherwise, process it as a
 	// compact, non-fragmented packet.
 
-	if fragmented := buf[0]&1 != 0; fragmented {
+	if flag := PacketDescriptor(buf[0]); flag.Toggled(FlagFragment) {
 		return e.recvFragmentedPacket(buf)
 	}
 

@@ -33,6 +33,29 @@ func (p *RecvPacket) Reset() {
 	*p = RecvPacket{}
 }
 
+type PacketDescriptor uint8
+
+const (
+	FlagFragment PacketDescriptor = iota
+	FlagA
+	FlagB
+	FlagC
+	FlagD
+	FlagACKEncoded
+)
+
+func (p PacketDescriptor) Toggle(flag PacketDescriptor) PacketDescriptor {
+	return p | (1 << flag)
+}
+
+func (p PacketDescriptor) Toggled(flag PacketDescriptor) bool {
+	return p&(1<<flag) != 0
+}
+
+func (p PacketDescriptor) AppendTo(dst []byte) []byte {
+	return append(dst, byte(p))
+}
+
 type PacketHeader struct {
 	seq  uint16
 	ack  uint16
@@ -42,18 +65,18 @@ type PacketHeader struct {
 func (p PacketHeader) AppendTo(dst []byte) []byte {
 	// Mark a flag byte to RLE-encode the ACK bitset.
 
-	flag := uint8(0)
+	flag := PacketDescriptor(0)
 	if p.acks&0x000000FF != 0x000000FF {
-		flag |= 1 << 1
+		flag = flag.Toggle(FlagA)
 	}
 	if p.acks&0x0000FF00 != 0x0000FF00 {
-		flag |= 1 << 2
+		flag = flag.Toggle(FlagB)
 	}
 	if p.acks&0x00FF0000 != 0x00FF0000 {
-		flag |= 1 << 3
+		flag = flag.Toggle(FlagC)
 	}
 	if p.acks&0xFF000000 != 0xFF000000 {
-		flag |= 1 << 4
+		flag = flag.Toggle(FlagD)
 	}
 
 	// If the difference between the sequence number and the latest ACK'd sequence number can be represented by a
@@ -64,12 +87,12 @@ func (p PacketHeader) AppendTo(dst []byte) []byte {
 		diff += 65536
 	}
 	if diff <= 255 {
-		flag |= 1 << 5
+		flag = flag.Toggle(FlagACKEncoded)
 	}
 
 	// Marshal the flag and sequence number and latest ACK'd sequence number.
 
-	dst = append(dst, flag)
+	dst = flag.AppendTo(dst)
 	dst = bytesutil.AppendUint16BE(dst, p.seq)
 
 	if diff <= 255 {
@@ -96,70 +119,70 @@ func (p PacketHeader) AppendTo(dst []byte) []byte {
 	return dst
 }
 
-func UnmarshalPacketHeader(b []byte) (header PacketHeader, leftover []byte, err error) {
-	var flag uint8
+func UnmarshalPacketHeader(buf []byte) (header PacketHeader, leftover []byte, err error) {
+	flag := PacketDescriptor(0)
 
 	// Read first 3 bytes (header, flag).
 
-	if len(b) < 3 {
-		return header, b, io.ErrUnexpectedEOF
+	if len(buf) < 3 {
+		return header, buf, io.ErrUnexpectedEOF
 	}
 
-	flag, b = b[0], b[1:]
+	flag, buf = PacketDescriptor(buf[0]), buf[1:]
 
 	if flag&1 != 0 {
-		return header, b, io.ErrUnexpectedEOF
+		return header, buf, io.ErrUnexpectedEOF
 	}
 
-	header.seq, b = bytesutil.Uint16BE(b[:2]), b[2:]
+	header.seq, buf = bytesutil.Uint16BE(buf[:2]), buf[2:]
 
 	// Read and decode the latest ACK'ed sequence number (either 1 or 2 bytes) using the RLE flag marker.
 
-	if flag&(1<<5) != 0 {
-		if len(b) < 1 {
-			return header, b, io.ErrUnexpectedEOF
+	if flag.Toggled(FlagACKEncoded) {
+		if len(buf) < 1 {
+			return header, buf, io.ErrUnexpectedEOF
 		}
-		header.ack, b = header.seq-uint16(b[0]), b[1:]
+		header.ack, buf = header.seq-uint16(buf[0]), buf[1:]
 	} else {
-		if len(b) < 2 {
-			return header, b, io.ErrUnexpectedEOF
+		if len(buf) < 2 {
+			return header, buf, io.ErrUnexpectedEOF
 		}
-		header.ack, b = bytesutil.Uint16BE(b[:2]), b[2:]
+		header.ack, buf = bytesutil.Uint16BE(buf[:2]), buf[2:]
 	}
 
-	if len(b) < bits.OnesCount8(flag&(1<<1|1<<2|1<<3|1<<4)) {
-		return header, b, io.ErrUnexpectedEOF
+	if len(buf) < bits.OnesCount8(byte(flag)&(1<<1|1<<2|1<<3|1<<4)) {
+		return header, buf, io.ErrUnexpectedEOF
 	}
 
 	// Read and decode ACK bitset using the RLE flag marker.
 
 	header.acks = 0xFFFFFFFF
 
-	if flag&(1<<1) != 0 {
+	if flag.Toggled(FlagA) {
 		header.acks &= 0xFFFFFF00
-		header.acks |= uint32(b[0])
-		b = b[1:]
+		header.acks |= uint32(buf[0])
+		buf = buf[1:]
 	}
 
-	if flag&(1<<2) != 0 {
+	if flag.Toggled(FlagB) {
 		header.acks &= 0xFFFF00FF
-		header.acks |= uint32(b[0]) << 8
-		b = b[1:]
+		header.acks |= uint32(buf[0]) << 8
+		buf = buf[1:]
 	}
 
-	if flag&(1<<3) != 0 {
+	if flag.Toggled(FlagC) {
 		header.acks &= 0xFF00FFFF
-		header.acks |= uint32(b[0]) << 16
-		b = b[1:]
+		header.acks |= uint32(buf[0]) << 16
+		buf = buf[1:]
 	}
 
-	if flag&(1<<4) != 0 {
+	if flag.Toggled(FlagD) {
 		header.acks &= 0x00FFFFFF
-		header.acks |= uint32(b[0]) << 24
-		b = b[1:]
+		header.acks |= uint32(buf[0]) << 24
+		buf = buf[1:]
 	}
 
-	return header, b, nil
+	return header, buf, nil
 }
 
 type Fragment struct {
