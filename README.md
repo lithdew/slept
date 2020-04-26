@@ -28,3 +28,4 @@ As a reference, I have been reading code from:
 
 1. The original reference reliable.io C implementation: [networkprotocol/reliable.io](https://github.com/networkprotocol/reliable.io)
 2. An unoptimized reliable.io Go implementation, which appears to be a direct translation of the original reference C implementation: [jakecoffman/rely](https://github.com/jakecoffman/rely)
+3. A realtime multiplayer reliable UDP networking library in Go using gafferongames' articles as a reference: [obsilp/rmnp](https://github.com/obsilp/rmnp) 
