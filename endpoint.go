@@ -272,7 +272,7 @@ func (e *Endpoint) recvFragmentedPacket(buf []byte) error {
 			err = fmt.Errorf("failed to recv reassembled packet: %w", err)
 		}
 
-		e.assembler.buf.Remove(header.seq)
+		e.assembler.Remove(header.seq)
 		e.pool.Put(entry.buf)
 
 		return err

@@ -17,10 +17,6 @@ func (s *SequenceBuffer) Reset() {
 	resetSequenceBuffer(s.entries)
 }
 
-func (s *SequenceBuffer) Remove(seq uint16) {
-	s.entries[seq%uint16(cap(s.entries))] = EmptySequenceBufferEntry
-}
-
 func (s *SequenceBuffer) RemoveRange(start, end uint16) {
 	start, end = start%(uint16(cap(s.entries))+1), end%(uint16(cap(s.entries))+1)
 
