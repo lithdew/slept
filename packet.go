@@ -226,7 +226,7 @@ func (f FragmentHeader) Validate(maxFragments uint8) error {
 }
 
 func (f FragmentHeader) AppendTo(dst []byte) []byte {
-	dst = append(dst, 1)
+	dst = PacketDescriptor(0).Toggle(FlagFragment).AppendTo(dst)
 	dst = bytesutil.AppendUint16BE(dst, f.seq)
 	dst = append(dst, f.id, f.total-1)
 	return dst
