@@ -9,18 +9,6 @@ func NewSentPacketBuffer(cap uint16) *SentPacketBuffer {
 	return &SentPacketBuffer{buf: NewSequenceBuffer(cap), entries: make([]SentPacket, cap, cap)}
 }
 
-func (s *SentPacketBuffer) Find(seq uint16) *SentPacket {
-	if i := seq % uint16(cap(s.entries)); s.buf.entries[i] == uint32(seq) {
-		return &s.entries[i]
-	}
-
-	return nil
-}
-
-func (s *SentPacketBuffer) IsOutdated(seq uint16) bool {
-	return seqLessThan(seq, s.buf.latest-uint16(cap(s.entries)))
-}
-
 func (s *SentPacketBuffer) Insert(seq uint16) *SentPacket {
 	// Packet is outdated. Ignore.
 
@@ -40,4 +28,16 @@ func (s *SentPacketBuffer) Insert(seq uint16) *SentPacket {
 	s.buf.entries[i] = uint32(seq)
 
 	return &s.entries[i]
+}
+
+func (s *SentPacketBuffer) Find(seq uint16) *SentPacket {
+	if i := seq % uint16(cap(s.entries)); s.buf.entries[i] == uint32(seq) {
+		return &s.entries[i]
+	}
+
+	return nil
+}
+
+func (s *SentPacketBuffer) IsOutdated(seq uint16) bool {
+	return seqLessThan(seq, s.buf.latest-uint16(cap(s.entries)))
 }

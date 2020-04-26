@@ -23,18 +23,6 @@ func (s *RecvPacketBuffer) NextACK() (ack uint16, acks uint32) {
 	return ack, acks
 }
 
-func (s *RecvPacketBuffer) Find(seq uint16) *RecvPacket {
-	if i := seq % uint16(cap(s.entries)); s.buf.entries[i] == uint32(seq) {
-		return &s.entries[i]
-	}
-
-	return nil
-}
-
-func (s *RecvPacketBuffer) IsOutdated(seq uint16) bool {
-	return seqLessThan(seq, s.buf.latest-uint16(cap(s.entries)))
-}
-
 func (s *RecvPacketBuffer) Insert(seq uint16) *RecvPacket {
 	// Packet is outdated. Ignore.
 
@@ -54,4 +42,16 @@ func (s *RecvPacketBuffer) Insert(seq uint16) *RecvPacket {
 	s.buf.entries[i] = uint32(seq)
 
 	return &s.entries[i]
+}
+
+func (s *RecvPacketBuffer) Find(seq uint16) *RecvPacket {
+	if i := seq % uint16(cap(s.entries)); s.buf.entries[i] == uint32(seq) {
+		return &s.entries[i]
+	}
+
+	return nil
+}
+
+func (s *RecvPacketBuffer) IsOutdated(seq uint16) bool {
+	return seqLessThan(seq, s.buf.latest-uint16(cap(s.entries)))
 }
