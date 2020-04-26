@@ -66,8 +66,8 @@ func (e *Endpoint) SendPacket(buf []byte, addr net.Addr) (int, error) {
 	// our packet was successfully received by them.
 
 	packet := e.sent.Insert(seq)
-
 	packet.Reset()
+
 	packet.time = e.time
 	packet.size = e.PacketHeaderSize + size
 
@@ -302,8 +302,8 @@ func (e *Endpoint) recvCompactPacket(buf []byte) error {
 	if recv == nil {
 		return fmt.Errorf("packet received w/ sequence number %d is stale", header.seq)
 	}
-
 	recv.Reset()
+
 	recv.time = e.time
 	recv.size = e.PacketHeaderSize + uint(len(buf))
 
