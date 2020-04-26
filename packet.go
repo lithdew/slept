@@ -36,7 +36,7 @@ func (p *RecvPacket) Reset() {
 type PacketDescriptor uint8
 
 const (
-	FlagFragment PacketDescriptor = iota
+	FlagFragment PacketDescriptor = 1 << iota
 	FlagA
 	FlagB
 	FlagC
@@ -45,11 +45,11 @@ const (
 )
 
 func (p PacketDescriptor) Toggle(flag PacketDescriptor) PacketDescriptor {
-	return p | (1 << flag)
+	return p | flag
 }
 
 func (p PacketDescriptor) Toggled(flag PacketDescriptor) bool {
-	return p&(1<<flag) != 0
+	return p&flag != 0
 }
 
 func (p PacketDescriptor) AppendTo(dst []byte) []byte {
@@ -226,7 +226,7 @@ func (f FragmentHeader) Validate(maxFragments uint8) error {
 }
 
 func (f FragmentHeader) AppendTo(dst []byte) []byte {
-	dst = PacketDescriptor(0).Toggle(FlagFragment).AppendTo(dst)
+	dst = FlagFragment.AppendTo(dst)
 	dst = bytesutil.AppendUint16BE(dst, f.seq)
 	dst = append(dst, f.id, f.total-1)
 	return dst
