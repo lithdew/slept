@@ -13,18 +13,29 @@ type Conn interface {
 }
 
 type Endpoint struct {
-	FragmentAbove      uint
-	FragmentSize       uint
-	MaxFragments       uint
-	MaxPacketSize      uint
-	PacketHeaderSize   uint
-	RTTSmoothingFactor float64
+	FragmentAbove                uint
+	FragmentSize                 uint
+	MaxFragments                 uint
+	MaxPacketSize                uint
+	PacketHeaderSize             uint
+	SentPacketBufferSize         uint
+	RecvPacketBufferSize         uint
+	FragmentReassemblyBufferSize uint
+
+	RTTSmoothingFactor        float64
+	PacketLossSmoothingFactor float64
+	BandwidthSmoothingFactor  float64
 
 	conn Conn
-
 	seq  uint16
-	time float64
-	rtt  float64
+
+	time       float64
+	rtt        float64
+	packetLoss float64
+
+	sentBandwidthKbps     float64
+	receivedBandwidthKbps float64
+	ackedBandwidthKbps    float64
 
 	sent      *SentPacketBuffer
 	recv      *RecvPacketBuffer
@@ -35,19 +46,25 @@ type Endpoint struct {
 
 func NewEndpoint(conn Conn) *Endpoint {
 	e := &Endpoint{
-		FragmentAbove:      1024,
-		FragmentSize:       1024,
-		MaxFragments:       16,
-		MaxPacketSize:      16 * 1024,
-		PacketHeaderSize:   20,
-		RTTSmoothingFactor: .0025,
+		FragmentAbove:                1024,
+		FragmentSize:                 1024,
+		MaxFragments:                 16,
+		MaxPacketSize:                16 * 1024,
+		PacketHeaderSize:             20,
+		SentPacketBufferSize:         256,
+		RecvPacketBufferSize:         256,
+		FragmentReassemblyBufferSize: 256,
+
+		RTTSmoothingFactor:        .0025,
+		PacketLossSmoothingFactor: .1,
+		BandwidthSmoothingFactor:  .1,
 
 		conn: conn,
-
-		sent:      NewSentPacketBuffer(256),
-		recv:      NewRecvPacketBuffer(256),
-		assembler: NewFragmentReassemblyBuffer(64),
 	}
+
+	e.sent = NewSentPacketBuffer(uint16(e.SentPacketBufferSize))
+	e.recv = NewRecvPacketBuffer(uint16(e.RecvPacketBufferSize))
+	e.assembler = NewFragmentReassemblyBuffer(uint16(e.FragmentReassemblyBufferSize))
 
 	return e
 }
@@ -217,7 +234,7 @@ func (e *Endpoint) recvFragmentedPacket(buf []byte) error {
 	if entry == nil {
 		entry = e.assembler.Insert(header.seq)
 		if entry == nil {
-			return fmt.Errorf("got invalid fragment with seq no %d: failed to insert into reassembly buffer",
+			return fmt.Errorf("got invalid fragment with sequence number %d: failed to insert into reassembly buffer",
 				header.seq,
 			)
 		}
@@ -339,4 +356,113 @@ func (e *Endpoint) processACKs(ack uint16, bitset uint32) {
 
 func (e *Endpoint) Update(time float64) {
 	e.time = time
+	e.updateStatistics()
+}
+
+func (e *Endpoint) updateStatistics() {
+	sentBase, sentSamples := (e.sent.buf.latest-uint16(cap(e.sent.entries))+1)+0xFFFF, e.SentPacketBufferSize/2
+	recvBase, recvSamples := (e.recv.buf.latest-uint16(cap(e.recv.entries))+1)+0xFFFF, e.RecvPacketBufferSize/2
+
+	dropped := 0
+
+	written, startWriting, finishWriting := 0, math.MaxFloat64, float64(0)
+	acked, startACKing, finishACKing := 0, math.MaxFloat64, float64(0)
+	received, startReceiving, finishReceiving := 0, math.MaxFloat64, float64(0)
+
+	for i := uint(0); i < sentSamples; i++ {
+		entry := e.sent.Find(sentBase + uint16(i))
+		if entry == nil {
+			continue
+		}
+
+		if !entry.acked {
+			dropped++
+		} else {
+			acked += int(entry.size)
+			if entry.time < startACKing {
+				startACKing = entry.time
+			}
+			if entry.time > finishACKing {
+				finishACKing = entry.time
+			}
+		}
+
+		written += int(entry.size)
+		if entry.time < startWriting {
+			startWriting = entry.time
+		}
+		if entry.time > finishWriting {
+			finishWriting = entry.time
+		}
+	}
+
+	for i := uint(0); i < recvSamples; i++ {
+		entry := e.recv.Find(recvBase + uint16(i))
+		if entry == nil {
+			continue
+		}
+
+		received += int(entry.size)
+		if entry.time < startReceiving {
+			startReceiving = entry.time
+		}
+		if entry.time > finishReceiving {
+			finishReceiving = entry.time
+		}
+	}
+
+	// Measure and smooth out packet loss.
+
+	if packetLoss := float64(dropped) / float64(sentSamples) * 100; math.Abs(e.packetLoss-packetLoss) > 0.00001 {
+		e.packetLoss += (packetLoss - e.packetLoss) * e.PacketLossSmoothingFactor
+	} else {
+		e.packetLoss = packetLoss
+	}
+
+	// Measure and smooth out sent bandwidth kbps.
+
+	if startWriting != math.MaxFloat64 && finishWriting != 0 {
+		sentBandwidthKbps := float64(written) / (finishWriting - startWriting) * 8 / 1000
+		if math.Abs(sentBandwidthKbps-sentBandwidthKbps) > 0.00001 {
+			e.sentBandwidthKbps += (sentBandwidthKbps - e.sentBandwidthKbps) * e.BandwidthSmoothingFactor
+		} else {
+			e.sentBandwidthKbps = sentBandwidthKbps
+		}
+	}
+
+	// Measure and smooth out received bandwidth kbps.
+
+	if startReceiving != math.MaxFloat64 && finishReceiving != 0 {
+		receivedBandwidthKbps := float64(received) / (finishReceiving - startReceiving) * 8 / 1000
+
+		if math.Abs(receivedBandwidthKbps-receivedBandwidthKbps) > 0.00001 {
+			e.receivedBandwidthKbps += (receivedBandwidthKbps - e.receivedBandwidthKbps) * e.BandwidthSmoothingFactor
+		} else {
+			e.receivedBandwidthKbps = receivedBandwidthKbps
+		}
+	}
+
+	// Measure and smooth out ACK'ed bandwidth kbps.
+
+	if startACKing != math.MaxFloat64 && finishACKing != 0 {
+		ackedBandwidthKbps := float64(acked) / (finishACKing - startACKing) * 8 / 1000
+
+		if math.Abs(ackedBandwidthKbps-ackedBandwidthKbps) > 0.00001 {
+			e.ackedBandwidthKbps += (ackedBandwidthKbps - e.ackedBandwidthKbps) * e.BandwidthSmoothingFactor
+		} else {
+			e.ackedBandwidthKbps = ackedBandwidthKbps
+		}
+	}
+}
+
+func (e *Endpoint) Bandwidth() (sent float64, received float64, acked float64) {
+	return e.sentBandwidthKbps, e.receivedBandwidthKbps, e.ackedBandwidthKbps
+}
+
+func (e *Endpoint) RTT() float64 {
+	return e.rtt
+}
+
+func (e *Endpoint) PacketLoss() float64 {
+	return e.packetLoss
 }

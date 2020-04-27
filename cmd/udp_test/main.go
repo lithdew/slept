@@ -13,12 +13,17 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 )
 
 func check(err error) {
 	if err != nil {
 		log.Panic(err)
 	}
+}
+
+func now() float64 {
+	return float64(time.Now().UnixNano()) / (1000 * 1000 * 1000)
 }
 
 func isSafeError(err error) bool {
@@ -50,6 +55,15 @@ func endpointRecv(wg *sync.WaitGroup, e *sleepy.Endpoint, conn net.PacketConn) {
 
 		check(e.RecvPacket(buf[:n]))
 
+		e.Update(now())
+
+		//sent, recv, acked := e.Bandwidth()
+		//fmt.Printf("rtt = %vms | packet loss = %v%% | sent = %vkbps | recv = %vkbps | acked = %vkbps\n",
+		//	e.RTT(),
+		//	int(math.Floor(e.PacketLoss()+.5)),
+		//	int(sent), int(recv), int(acked),
+		//)
+
 		if enableLogs {
 			log.Printf("recv %d byte(s)", n)
 		}
@@ -72,15 +86,26 @@ func endpointSend(wg *sync.WaitGroup, e *sleepy.Endpoint) {
 			check(err)
 		}
 
+		e.Update(now())
+
+		//sent, recv, acked := e.Bandwidth()
+		//fmt.Printf("rtt = %vms | packet loss = %v%% | sent = %vkbps | recv = %vkbps | acked = %vkbps\n",
+		//	e.RTT(),
+		//	int(math.Floor(e.PacketLoss()+.5)),
+		//	int(sent), int(recv), int(acked),
+		//)
+
 		if enableLogs {
 			log.Printf("sent %d byte(s)", n)
 		}
 	}
 }
 
-var client bool
-var enableLogs bool
-var enableProfiling bool
+var (
+	client          bool
+	enableLogs      bool
+	enableProfiling bool
+)
 
 func runClient(addr *net.UDPAddr) {
 	conn, err := net.DialUDP("udp", nil, addr)
