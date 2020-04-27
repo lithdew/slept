@@ -51,7 +51,7 @@ func NewEndpoint(dispatcher EndpointDispatcher, config *Config) *Endpoint {
 	return e
 }
 
-func (e *Endpoint) SendPacket(buf []byte) (written int) {
+func (e *Endpoint) WritePacket(buf []byte) (written int) {
 	seq, size := e.seq, uint(len(buf))
 
 	if size > e.config.MaxPacketSize {
@@ -155,7 +155,7 @@ func (e *Endpoint) SendPacket(buf []byte) (written int) {
 	return written
 }
 
-func (e *Endpoint) RecvPacket(buf []byte) error {
+func (e *Endpoint) ReadPacket(buf []byte) error {
 	// If the first bit is set, process the packet as a fragmented packet. Otherwise, process it as a
 	// compact, non-fragmented packet.
 

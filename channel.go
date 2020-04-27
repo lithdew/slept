@@ -1,6 +1,7 @@
 package sleepy
 
 import (
+	"fmt"
 	"github.com/lithdew/bytesutil"
 	"github.com/valyala/bytebufferpool"
 )
@@ -13,42 +14,68 @@ type Channel struct {
 
 	queue []*bytebufferpool.ByteBuffer
 
+	readQueue  chan []byte
+	writeQueue chan []byte
+	out        chan []byte
+
 	oldestUnacked uint16
 }
 
 func NewChannel(config *Config) *Channel {
 	channel := new(Channel)
+
 	channel.endpoint = NewEndpoint(channel, config)
+	channel.readQueue = make(chan []byte, channel.endpoint.config.RecvPacketBufferSize)
+	channel.writeQueue = make(chan []byte, channel.endpoint.config.SentPacketBufferSize)
+	channel.out = make(chan []byte, channel.endpoint.config.SentPacketBufferSize*2)
 	channel.window = NewPacketBuffer(uint16(channel.endpoint.config.SentPacketBufferSize))
+
 	return channel
 }
 
-func (c *Channel) SendPacket(buf []byte) {
-	seq := c.endpoint.Next()
+func (c *Channel) Read(buf []byte) {
+	c.readQueue <- buf
+}
 
-	if c.oldestUnacked+uint16(c.endpoint.config.RecvPacketBufferSize) == seq {
-		b := c.endpoint.pool.Get()
-		b.B = bytesutil.ExtendSlice(b.B, len(buf))
-		copy(b.B, buf)
+func (c *Channel) Write(buf []byte) {
+	c.writeQueue <- buf
+}
 
-		c.queue = append(c.queue, b)
+func (c *Channel) Update(time float64) error {
+	c.endpoint.Update(time)
 
-		return
+Reading:
+	for {
+		select {
+		case b := <-c.readQueue:
+			err := c.endpoint.ReadPacket(b)
+			if err != nil {
+				return fmt.Errorf("failed to receive packet: %w", err)
+			}
+		default:
+			break Reading
+		}
 	}
 
-	c.endpoint.SendPacket(buf)
-}
+Writing:
+	for {
+		select {
+		case buf := <-c.writeQueue:
+			if c.oldestUnacked+uint16(c.endpoint.config.RecvPacketBufferSize) == c.endpoint.seq {
+				b := c.endpoint.pool.Get()
+				b.B = bytesutil.ExtendSlice(b.B, len(buf))
+				copy(b.B, buf)
 
-func (c *Channel) RecvPacket(buf []byte) error {
-	return c.endpoint.RecvPacket(buf)
-}
+				c.queue = append(c.queue, b)
+				continue
+			}
 
-func (c *Channel) Update(time float64) {
-	c.endpoint.Update(time)
-	c.update()
-}
+			c.endpoint.WritePacket(buf)
+		default:
+			break Writing
+		}
+	}
 
-func (c *Channel) update() {
 	// Resend messages that have yet to be ACK'ed after 0.1 seconds from the moment we sent them.
 
 	max := c.oldestUnacked + uint16(c.endpoint.config.RecvPacketBufferSize)
@@ -63,13 +90,10 @@ func (c *Channel) update() {
 			continue
 		}
 
-		// REAL transmit
-		c.transmit(packet.buf.B)
+		c.out <- packet.buf.B
 	}
-}
 
-func (c *Channel) transmit(buf []byte) {
-
+	return nil
 }
 
 func (c *Channel) Transmit(seq uint16, buf []byte) {
@@ -83,11 +107,10 @@ func (c *Channel) Transmit(seq uint16, buf []byte) {
 	packet.time = c.endpoint.time
 	packet.buf = b
 
-	c.transmit(packet.buf.B)
+	c.out <- packet.buf.B
 }
 
-func (c *Channel) Process(seq uint16, buf []byte) {
-
+func (c *Channel) Process(_ uint16, buf []byte) {
 }
 
 func (c *Channel) ACK(seq uint16) {
@@ -132,8 +155,7 @@ func (c *Channel) ACK(seq uint16) {
 	for i := uint16(0); len(c.queue) > 0 && i < diff; i++ {
 		popped := c.queue[0]
 		c.queue = c.queue[1:]
-
-		c.endpoint.SendPacket(popped.B)
+		c.endpoint.WritePacket(popped.B)
 		c.endpoint.pool.Put(popped)
 	}
 }

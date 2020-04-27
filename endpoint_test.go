@@ -41,14 +41,14 @@ func TestEndpointSendRecvCompactPacket(t *testing.T) {
 
 	// Have client send data.
 
-	client.SendPacket(data)
+	client.WritePacket(data)
 
 	require.NoError(t, err)
 	require.Len(t, clientConn.w, 1)
 
 	// Have server receive data.
 
-	require.NoError(t, server.RecvPacket(clientConn.w[0]))
+	require.NoError(t, server.ReadPacket(clientConn.w[0]))
 
 	require.EqualValues(t, client.sent.buf.latest, 1)
 	require.EqualValues(t, client.recv.buf.latest, 0)
@@ -59,14 +59,14 @@ func TestEndpointSendRecvCompactPacket(t *testing.T) {
 
 	// Have server send data.
 
-	server.SendPacket(data)
+	server.WritePacket(data)
 
 	require.NoError(t, err)
 	require.Len(t, serverConn.w, 1)
 
 	// Have client receive data.
 
-	require.NoError(t, client.RecvPacket(serverConn.w[0]))
+	require.NoError(t, client.ReadPacket(serverConn.w[0]))
 
 	require.EqualValues(t, client.sent.buf.latest, 1)
 	require.EqualValues(t, client.recv.buf.latest, 1)
@@ -107,13 +107,13 @@ func TestEndpointSendRecvFragmentedPacket(t *testing.T) {
 	_, err = src.Read(data)
 	require.NoError(t, err)
 
-	client.SendPacket(data)
+	client.WritePacket(data)
 	require.Len(t, clientConn.w, int(client.config.MaxFragments))
 
 	// Have server receive data.
 
 	for _, i := range src.Perm(len(clientConn.w)) {
-		require.NoError(t, server.RecvPacket(clientConn.w[i]))
+		require.NoError(t, server.ReadPacket(clientConn.w[i]))
 	}
 
 	require.EqualValues(t, client.sent.buf.latest, 1)

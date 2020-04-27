@@ -54,7 +54,7 @@ package main
 //			check(err)
 //		}
 //
-//		check(e.RecvPacket(buf[:n]))
+//		check(e.ReadPacket(buf[:n]))
 //
 //		e.Update(now())
 //
@@ -79,7 +79,7 @@ package main
 //	for {
 //		buf = bytesutil.RandomSlice(buf)
 //
-//		n, err := e.SendPacket(buf)
+//		n, err := e.WritePacket(buf)
 //		if err != nil {
 //			if isSafeError(err) {
 //				return
@@ -108,7 +108,7 @@ package main
 //	enableProfiling bool
 //)
 //
-//func runClient(addr *net.UDPAddr) {
+//func client(addr *net.UDPAddr) {
 //	conn, err := net.DialUDP("udp", nil, addr)
 //	check(err)
 //
@@ -167,7 +167,7 @@ package main
 //		}
 //
 //		log.Println("running as client")
-//		runClient(addr)
+//		client(addr)
 //	} else {
 //		opts = append(opts, profile.ProfilePath("./cmd/udp_test/server"))
 //

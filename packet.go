@@ -158,7 +158,7 @@ func UnmarshalPacketHeader(buf []byte) (header PacketHeader, leftover []byte, er
 		header.ack, buf = bytesutil.Uint16BE(buf[:2]), buf[2:]
 	}
 
-	if len(buf) < bits.OnesCount8(byte(flag)&(1<<1|1<<2|1<<3|1<<4)) {
+	if len(buf) < bits.OnesCount8(uint8(flag&(FlagA|FlagB|FlagC|FlagD))) {
 		return header, buf, io.ErrUnexpectedEOF
 	}
 

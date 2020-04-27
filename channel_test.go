@@ -10,8 +10,9 @@ func TestChannelFullBufferWorstCase(t *testing.T) {
 
 	i := 0
 	for len(channel.queue) == 0 {
-		channel.SendPacket(nil)
 		i++
+		channel.Write(nil)
+		require.NoError(t, channel.Update(0))
 	}
 
 	require.EqualValues(t, channel.endpoint.config.RecvPacketBufferSize+1, i)
@@ -39,8 +40,9 @@ func TestChannelEmptyQueue(t *testing.T) {
 
 	i := 0
 	for len(channel.queue) == 0 {
-		channel.SendPacket(nil)
 		i++
+		channel.Write(nil)
+		require.NoError(t, channel.Update(0))
 	}
 
 	require.EqualValues(t, channel.endpoint.config.RecvPacketBufferSize+1, i)
