@@ -13,7 +13,7 @@ func (s *RecvPacketBuffer) NextACK() (ack uint16, acks uint32) {
 	ack = s.buf.latest - 1
 
 	for i, m := uint16(0), uint32(1); i < 32; i, m = i+1, m<<1 {
-		if i := ack - i; s.buf.entries[i%uint16(cap(s.entries))] != uint32(i) {
+		if id := ack - i; s.buf.entries[id%uint16(cap(s.entries))] != uint32(id) {
 			continue
 		}
 
