@@ -86,13 +86,16 @@ Writing:
 			continue
 		}
 
-		if !packet.written || c.endpoint.time-packet.time < 0.1 {
+		if !packet.written {
+			packet.written, packet.time = true, time
+			c.outQueue <- packet.buf.B
 			continue
 		}
 
-		packet.written = true
-
-		c.outQueue <- packet.buf.B
+		if time-packet.time >= 0.1 {
+			c.outQueue <- packet.buf.B
+			continue
+		}
 	}
 
 	return nil
@@ -105,8 +108,6 @@ func (c *Channel) Transmit(seq uint16, buf []byte) {
 
 	packet := c.window.Insert(seq)
 	packet.Reset()
-
-	packet.time = c.endpoint.time
 	packet.buf = b
 }
 
