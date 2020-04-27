@@ -16,7 +16,7 @@ type Channel struct {
 
 	readQueue  chan []byte
 	writeQueue chan []byte
-	out        chan []byte
+	outQueue   chan []byte
 
 	oldestUnacked uint16
 }
@@ -27,7 +27,7 @@ func NewChannel(config *Config) *Channel {
 	channel.endpoint = NewEndpoint(channel, config)
 	channel.readQueue = make(chan []byte, channel.endpoint.config.RecvPacketBufferSize)
 	channel.writeQueue = make(chan []byte, channel.endpoint.config.SentPacketBufferSize)
-	channel.out = make(chan []byte, channel.endpoint.config.SentPacketBufferSize*2)
+	channel.outQueue = make(chan []byte, channel.endpoint.config.SentPacketBufferSize)
 	channel.window = NewPacketBuffer(uint16(channel.endpoint.config.SentPacketBufferSize))
 
 	return channel
@@ -86,11 +86,13 @@ Writing:
 			continue
 		}
 
-		if c.endpoint.time-packet.time < 0.1 {
+		if !packet.written || c.endpoint.time-packet.time < 0.1 {
 			continue
 		}
 
-		c.out <- packet.buf.B
+		packet.written = true
+
+		c.outQueue <- packet.buf.B
 	}
 
 	return nil
@@ -106,8 +108,6 @@ func (c *Channel) Transmit(seq uint16, buf []byte) {
 
 	packet.time = c.endpoint.time
 	packet.buf = b
-
-	c.out <- packet.buf.B
 }
 
 func (c *Channel) Process(_ uint16, buf []byte) {

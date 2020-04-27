@@ -14,8 +14,9 @@ const (
 )
 
 type BufferedPacket struct {
-	time float64
-	buf  *bytebufferpool.ByteBuffer
+	time    float64
+	written bool
+	buf     *bytebufferpool.ByteBuffer
 }
 
 func (p *BufferedPacket) Reset() {
