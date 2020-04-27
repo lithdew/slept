@@ -19,6 +19,7 @@ type Channel struct {
 	queue []*bytebufferpool.ByteBuffer
 
 	oldestUnacked uint16
+	lastSent      float64
 }
 
 func NewChannel(config *Config) *Channel {
@@ -92,14 +93,23 @@ Writing:
 			continue
 		}
 
-		if !packet.written {
-			packet.written, packet.time = true, time
-		}
+		packet.written = true
+		packet.time = time
+
+		c.lastSent = time
 
 		c.outQueue <- packet.buf.B
 	}
 
+	if time-c.lastSent >= 0.1 {
+		c.endpoint.WritePacket(nil)
+	}
+
 	return nil
+}
+
+func (c *Channel) Out() <-chan []byte {
+	return c.outQueue
 }
 
 func (c *Channel) Transmit(seq uint16, buf []byte) {
@@ -112,7 +122,8 @@ func (c *Channel) Transmit(seq uint16, buf []byte) {
 	packet.buf = b
 }
 
-func (c *Channel) Process(_ uint16, buf []byte) {
+func (c *Channel) Process(seq uint16, data []byte) {
+	fmt.Printf("[sequence number: %d, content: %q]\n", seq, string(data))
 }
 
 func (c *Channel) ACK(seq uint16) {
