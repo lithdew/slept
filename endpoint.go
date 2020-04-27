@@ -14,7 +14,7 @@ type EndpointDispatcher interface {
 }
 
 type Endpoint struct {
-	config *Config
+	config Config
 
 	dispatcher EndpointDispatcher
 	seq        uint16
@@ -40,7 +40,7 @@ func NewEndpoint(dispatcher EndpointDispatcher, config *Config) *Endpoint {
 	}
 
 	e := &Endpoint{
-		config:     config,
+		config:     *config,
 		dispatcher: dispatcher,
 	}
 
