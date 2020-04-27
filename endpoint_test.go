@@ -4,7 +4,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"math/rand"
 	"testing"
-	"time"
 )
 
 var _ Conn = (*MockConn)(nil)
@@ -95,7 +94,7 @@ func TestEndpointSendRecvFragmentedPacket(t *testing.T) {
 
 	// Create a packet of max size.
 
-	src := rand.New(rand.NewSource(time.Now().Unix()))
+	src := rand.New(rand.NewSource(1337))
 	data := make([]byte, client.MaxPacketSize)
 
 	_, err = src.Read(data)

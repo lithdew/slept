@@ -32,10 +32,10 @@ func (p *RecvPacket) Reset() {
 	*p = RecvPacket{}
 }
 
-type PacketDescriptor uint8
+type PacketHeaderFlag uint8
 
 const (
-	FlagFragment PacketDescriptor = 1 << iota
+	FlagFragment PacketHeaderFlag = 1 << iota
 	FlagA
 	FlagB
 	FlagC
@@ -43,15 +43,15 @@ const (
 	FlagACKEncoded
 )
 
-func (p PacketDescriptor) Toggle(flag PacketDescriptor) PacketDescriptor {
+func (p PacketHeaderFlag) Toggle(flag PacketHeaderFlag) PacketHeaderFlag {
 	return p | flag
 }
 
-func (p PacketDescriptor) Toggled(flag PacketDescriptor) bool {
+func (p PacketHeaderFlag) Toggled(flag PacketHeaderFlag) bool {
 	return p&flag != 0
 }
 
-func (p PacketDescriptor) AppendTo(dst []byte) []byte {
+func (p PacketHeaderFlag) AppendTo(dst []byte) []byte {
 	return append(dst, byte(p))
 }
 
@@ -64,7 +64,7 @@ type PacketHeader struct {
 func (p PacketHeader) AppendTo(dst []byte) []byte {
 	// Mark a flag byte to RLE-encode the ACK bitset.
 
-	flag := PacketDescriptor(0)
+	flag := PacketHeaderFlag(0)
 	if p.acks&0x000000FF != 0x000000FF {
 		flag = flag.Toggle(FlagA)
 	}
@@ -119,7 +119,7 @@ func (p PacketHeader) AppendTo(dst []byte) []byte {
 }
 
 func UnmarshalPacketHeader(buf []byte) (header PacketHeader, leftover []byte, err error) {
-	flag := PacketDescriptor(0)
+	flag := PacketHeaderFlag(0)
 
 	// Read first 3 bytes (header, flag).
 
@@ -127,9 +127,9 @@ func UnmarshalPacketHeader(buf []byte) (header PacketHeader, leftover []byte, er
 		return header, buf, io.ErrUnexpectedEOF
 	}
 
-	flag, buf = PacketDescriptor(buf[0]), buf[1:]
+	flag, buf = PacketHeaderFlag(buf[0]), buf[1:]
 
-	if flag&1 != 0 {
+	if flag.Toggled(FlagFragment) {
 		return header, buf, io.ErrUnexpectedEOF
 	}
 
