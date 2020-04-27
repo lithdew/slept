@@ -76,7 +76,8 @@ Writing:
 		}
 	}
 
-	// Resend messages that have yet to be ACK'ed after 0.1 seconds from the moment we sent them.
+	// Write packets that have yet to be written, and also write packets that have yet to be ACK'ed after 0.1 seconds
+	// from the moment we originally wrote them.
 
 	max := c.oldestUnacked + uint16(c.endpoint.config.RecvPacketBufferSize)
 
