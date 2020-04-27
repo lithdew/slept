@@ -87,16 +87,15 @@ Writing:
 			continue
 		}
 
-		if !packet.written {
-			packet.written, packet.time = true, time
-			c.outQueue <- packet.buf.B
+		if packet.written && time-packet.time < 0.1 {
 			continue
 		}
 
-		if time-packet.time >= 0.1 {
-			c.outQueue <- packet.buf.B
-			continue
+		if !packet.written {
+			packet.written, packet.time = true, time
 		}
+
+		c.outQueue <- packet.buf.B
 	}
 
 	return nil
