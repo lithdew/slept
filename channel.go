@@ -12,11 +12,11 @@ type Channel struct {
 	endpoint *Endpoint
 	window   *PacketBuffer
 
-	queue []*bytebufferpool.ByteBuffer
-
 	readQueue  chan []byte
 	writeQueue chan []byte
 	outQueue   chan []byte
+
+	queue []*bytebufferpool.ByteBuffer
 
 	oldestUnacked uint16
 }
@@ -25,10 +25,11 @@ func NewChannel(config *Config) *Channel {
 	channel := new(Channel)
 
 	channel.endpoint = NewEndpoint(channel, config)
+	channel.window = NewPacketBuffer(uint16(channel.endpoint.config.SentPacketBufferSize))
+
 	channel.readQueue = make(chan []byte, channel.endpoint.config.RecvPacketBufferSize)
 	channel.writeQueue = make(chan []byte, channel.endpoint.config.SentPacketBufferSize)
 	channel.outQueue = make(chan []byte, channel.endpoint.config.SentPacketBufferSize)
-	channel.window = NewPacketBuffer(uint16(channel.endpoint.config.SentPacketBufferSize))
 
 	return channel
 }
