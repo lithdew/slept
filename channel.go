@@ -11,7 +11,6 @@ type Channel struct {
 	endpoint *Endpoint
 	window   *PacketBuffer
 
-	pool  bytebufferpool.Pool
 	queue []*bytebufferpool.ByteBuffer
 
 	oldestUnacked uint16
@@ -28,7 +27,7 @@ func (c *Channel) SendPacket(buf []byte) {
 	seq := c.endpoint.Next()
 
 	if c.oldestUnacked+uint16(c.endpoint.config.RecvPacketBufferSize) == seq {
-		b := c.pool.Get()
+		b := c.endpoint.pool.Get()
 		b.B = bytesutil.ExtendSlice(b.B, len(buf))
 		copy(b.B, buf)
 
@@ -74,7 +73,7 @@ func (c *Channel) transmit(buf []byte) {
 }
 
 func (c *Channel) Transmit(seq uint16, buf []byte) {
-	b := c.pool.Get()
+	b := c.endpoint.pool.Get()
 	b.B = bytesutil.ExtendSlice(b.B, len(buf))
 	copy(b.B, buf)
 
@@ -98,7 +97,7 @@ func (c *Channel) ACK(seq uint16) {
 	}
 
 	c.window.Remove(seq)
-	c.pool.Put(packet.buf)
+	c.endpoint.pool.Put(packet.buf)
 
 	if seq != c.oldestUnacked {
 		return
@@ -135,6 +134,6 @@ func (c *Channel) ACK(seq uint16) {
 		c.queue = c.queue[1:]
 
 		c.endpoint.SendPacket(popped.B)
-		c.pool.Put(popped)
+		c.endpoint.pool.Put(popped)
 	}
 }
