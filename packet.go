@@ -13,6 +13,15 @@ const (
 	FragmentHeaderSize  = uint(5)
 )
 
+type BufferedPacket struct {
+	time float64
+	buf  *bytebufferpool.ByteBuffer
+}
+
+func (p *BufferedPacket) Reset() {
+	*p = BufferedPacket{}
+}
+
 type SentPacket struct {
 	time  float64
 	acked bool

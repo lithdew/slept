@@ -6,22 +6,29 @@ import (
 	"testing"
 )
 
-var _ Conn = (*MockConn)(nil)
+var _ EndpointDispatcher = (*MockDispatcher)(nil)
 
-type MockConn struct {
-	buf [][]byte
+type MockDispatcher struct {
+	r, w [][]byte
 }
 
-func (c *MockConn) Write(b []byte) (int, error) {
-	c.buf = append(c.buf, make([]byte, len(b)))
-	return copy(c.buf[len(c.buf)-1], b), nil
+func (m *MockDispatcher) Transmit(seq uint16, buf []byte) {
+	m.w = append(m.w, make([]byte, len(buf)))
+	copy(m.w[len(m.w)-1], buf)
 }
 
-func newTestEndpoint(t *testing.T) (*Endpoint, *MockConn) {
+func (m *MockDispatcher) Process(seq uint16, buf []byte) {
+	m.r = append(m.r, make([]byte, len(buf)))
+	copy(m.r[len(m.r)-1], buf)
+}
+
+func (m *MockDispatcher) ACK(_ uint16) {}
+
+func newTestEndpoint(t *testing.T) (*Endpoint, *MockDispatcher) {
 	t.Helper()
 
-	endpoint := NewEndpoint(new(MockConn))
-	return endpoint, endpoint.conn.(*MockConn)
+	endpoint := NewEndpoint(new(MockDispatcher), nil)
+	return endpoint, endpoint.dispatcher.(*MockDispatcher)
 }
 
 func TestEndpointSendRecvCompactPacket(t *testing.T) {
@@ -34,14 +41,14 @@ func TestEndpointSendRecvCompactPacket(t *testing.T) {
 
 	// Have client send data.
 
-	_, err = client.SendPacket(data)
+	client.SendPacket(data)
 
 	require.NoError(t, err)
-	require.Len(t, clientConn.buf, 1)
+	require.Len(t, clientConn.w, 1)
 
 	// Have server receive data.
 
-	require.NoError(t, server.RecvPacket(clientConn.buf[0]))
+	require.NoError(t, server.RecvPacket(clientConn.w[0]))
 
 	require.EqualValues(t, client.sent.buf.latest, 1)
 	require.EqualValues(t, client.recv.buf.latest, 0)
@@ -52,14 +59,14 @@ func TestEndpointSendRecvCompactPacket(t *testing.T) {
 
 	// Have server send data.
 
-	_, err = server.SendPacket(data)
+	server.SendPacket(data)
 
 	require.NoError(t, err)
-	require.Len(t, serverConn.buf, 1)
+	require.Len(t, serverConn.w, 1)
 
 	// Have client receive data.
 
-	require.NoError(t, client.RecvPacket(serverConn.buf[0]))
+	require.NoError(t, client.RecvPacket(serverConn.w[0]))
 
 	require.EqualValues(t, client.sent.buf.latest, 1)
 	require.EqualValues(t, client.recv.buf.latest, 1)
@@ -79,36 +86,34 @@ func TestEndpointSendRecvFragmentedPacket(t *testing.T) {
 	client, clientConn := newTestEndpoint(t)
 	server, serverConn := newTestEndpoint(t)
 
-	client.MaxFragments, server.MaxFragments = 256, 256
-	client.MaxPacketSize = client.MaxFragments * client.FragmentSize
-	server.MaxPacketSize = server.MaxFragments * server.FragmentSize
+	client.config.MaxFragments, server.config.MaxFragments = 256, 256
+	client.config.MaxPacketSize = client.config.MaxFragments * client.config.FragmentSize
+	server.config.MaxPacketSize = server.config.MaxFragments * server.config.FragmentSize
 
 	// Ensure that default settings are correct.
 
-	require.EqualValues(t, client.FragmentSize*client.MaxFragments, client.MaxPacketSize)
-	require.EqualValues(t, server.FragmentSize*server.MaxFragments, server.MaxPacketSize)
+	require.EqualValues(t, client.config.FragmentSize*client.config.MaxFragments, client.config.MaxPacketSize)
+	require.EqualValues(t, server.config.FragmentSize*server.config.MaxFragments, server.config.MaxPacketSize)
 
-	require.EqualValues(t, client.MaxPacketSize, server.MaxPacketSize)
+	require.EqualValues(t, client.config.MaxPacketSize, server.config.MaxPacketSize)
 
 	_, _ = clientConn, serverConn
 
 	// Create a packet of max size.
 
 	src := rand.New(rand.NewSource(1337))
-	data := make([]byte, client.MaxPacketSize)
+	data := make([]byte, client.config.MaxPacketSize)
 
 	_, err = src.Read(data)
 	require.NoError(t, err)
 
-	_, err = client.SendPacket(data)
-
-	require.NoError(t, err)
-	require.Len(t, clientConn.buf, int(client.MaxFragments))
+	client.SendPacket(data)
+	require.Len(t, clientConn.w, int(client.config.MaxFragments))
 
 	// Have server receive data.
 
-	for _, i := range src.Perm(len(clientConn.buf)) {
-		require.NoError(t, server.RecvPacket(clientConn.buf[i]))
+	for _, i := range src.Perm(len(clientConn.w)) {
+		require.NoError(t, server.RecvPacket(clientConn.w[i]))
 	}
 
 	require.EqualValues(t, client.sent.buf.latest, 1)
@@ -121,7 +126,7 @@ func TestEndpointSendRecvFragmentedPacket(t *testing.T) {
 
 	// Make sure all fragments are received.
 
-	for id := uint(0); id < client.MaxFragments; id++ {
+	for id := uint(0); id < client.config.MaxFragments; id++ {
 		require.Error(t, server.assembler.entries[0].MarkReceived(byte(id)))
 	}
 }

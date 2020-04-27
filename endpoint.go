@@ -4,30 +4,20 @@ import (
 	"fmt"
 	"github.com/lithdew/bytesutil"
 	"github.com/valyala/bytebufferpool"
-	"io"
 	"math"
 )
 
-type Conn interface {
-	Write(buf []byte) (int, error)
+type EndpointDispatcher interface {
+	Transmit(seq uint16, buf []byte)
+	Process(seq uint16, buf []byte)
+	ACK(seq uint16)
 }
 
 type Endpoint struct {
-	FragmentAbove                uint
-	FragmentSize                 uint
-	MaxFragments                 uint
-	MaxPacketSize                uint
-	PacketHeaderSize             uint
-	SentPacketBufferSize         uint
-	RecvPacketBufferSize         uint
-	FragmentReassemblyBufferSize uint
+	config *Config
 
-	RTTSmoothingFactor        float64
-	PacketLossSmoothingFactor float64
-	BandwidthSmoothingFactor  float64
-
-	conn Conn
-	seq  uint16
+	dispatcher EndpointDispatcher
+	seq        uint16
 
 	time       float64
 	rtt        float64
@@ -44,36 +34,28 @@ type Endpoint struct {
 	pool bytebufferpool.Pool
 }
 
-func NewEndpoint(conn Conn) *Endpoint {
-	e := &Endpoint{
-		FragmentAbove:                1024,
-		FragmentSize:                 1024,
-		MaxFragments:                 16,
-		MaxPacketSize:                16 * 1024,
-		PacketHeaderSize:             20,
-		SentPacketBufferSize:         256,
-		RecvPacketBufferSize:         256,
-		FragmentReassemblyBufferSize: 256,
-
-		RTTSmoothingFactor:        .0025,
-		PacketLossSmoothingFactor: .1,
-		BandwidthSmoothingFactor:  .1,
-
-		conn: conn,
+func NewEndpoint(dispatcher EndpointDispatcher, config *Config) *Endpoint {
+	if config == nil {
+		config = NewConfig()
 	}
 
-	e.sent = NewSentPacketBuffer(uint16(e.SentPacketBufferSize))
-	e.recv = NewRecvPacketBuffer(uint16(e.RecvPacketBufferSize))
-	e.assembler = NewFragmentReassemblyBuffer(uint16(e.FragmentReassemblyBufferSize))
+	e := &Endpoint{
+		config:     config,
+		dispatcher: dispatcher,
+	}
+
+	e.sent = NewSentPacketBuffer(uint16(e.config.SentPacketBufferSize))
+	e.recv = NewRecvPacketBuffer(uint16(e.config.RecvPacketBufferSize))
+	e.assembler = NewFragmentReassemblyBuffer(uint16(e.config.FragmentReassemblyBufferSize))
 
 	return e
 }
 
-func (e *Endpoint) SendPacket(buf []byte) (int, error) {
-	seq, written, size := e.seq, 0, uint(len(buf))
+func (e *Endpoint) SendPacket(buf []byte) (written int) {
+	seq, size := e.seq, uint(len(buf))
 
-	if size > e.MaxPacketSize {
-		return 0, fmt.Errorf("packet is too large: size is %d, but max is %d", size, e.MaxPacketSize)
+	if size > e.config.MaxPacketSize {
+		return 0
 	}
 
 	// Increment the last sent sequence number for the next packet.
@@ -87,7 +69,7 @@ func (e *Endpoint) SendPacket(buf []byte) (int, error) {
 	packet.Reset()
 
 	packet.time = e.time
-	packet.size = e.PacketHeaderSize + size
+	packet.size = e.config.PacketHeaderSize + size
 
 	// Get the last latest acknowledge sequence number, and a bitset of the last 32 acknowledged packet sequence
 	// numbers.
@@ -111,7 +93,7 @@ func (e *Endpoint) SendPacket(buf []byte) (int, error) {
 	// If the packet is small enough, we don't need to fragment it and can prepend a header to it and directly
 	// send it out. Otherwise, we will fragment the packet out.
 
-	if size <= e.FragmentAbove {
+	if size <= e.config.FragmentAbove {
 		// Allocate enough space for the packet header and the packets data.
 		scratch.B = bytesutil.ExtendSlice(scratch.B, int(MaxPacketHeaderSize+size))
 
@@ -120,13 +102,15 @@ func (e *Endpoint) SendPacket(buf []byte) (int, error) {
 		written += copy(scratch.B[written:], buf)
 
 		// Write to the connection all data written to the scratch buffer.
-		return e.conn.Write(scratch.B[:written])
+		e.dispatcher.Transmit(seq, scratch.B[:written])
+
+		return written
 	}
 
 	// Figure out how many fragments we need to partition our data into.
 
-	total := size / e.FragmentSize
-	if size%e.FragmentSize != 0 {
+	total := size / e.config.FragmentSize
+	if size%e.config.FragmentSize != 0 {
 		total++
 	}
 
@@ -134,7 +118,7 @@ func (e *Endpoint) SendPacket(buf []byte) (int, error) {
 	fh := FragmentHeader{seq: header.seq, total: uint8(total - 1)}
 
 	// Allocate enough space for the fragment header, the packet header, and the fragments data.
-	scratch.B = bytesutil.ExtendSlice(scratch.B[:0], int(FragmentHeaderSize+MaxPacketHeaderSize+e.FragmentSize))
+	scratch.B = bytesutil.ExtendSlice(scratch.B[:0], int(FragmentHeaderSize+MaxPacketHeaderSize+e.config.FragmentSize))
 
 	for id := uint(0); id < total; id++ {
 		scratch.B = scratch.B[:0]
@@ -153,32 +137,25 @@ func (e *Endpoint) SendPacket(buf []byte) (int, error) {
 		// Write the fragments data, capped at most FragmentSize bytes.
 
 		cutoff := uint(len(buf))
-		if cutoff > e.FragmentSize {
-			cutoff = e.FragmentSize
+		if cutoff > e.config.FragmentSize {
+			cutoff = e.config.FragmentSize
 		}
 
 		scratch.B, buf = append(scratch.B, buf[:cutoff]...), buf[cutoff:]
 
 		// Write the fragment to the connection.
 
-		n, err := e.conn.Write(scratch.B)
-		if err != nil {
-			return written + n, fmt.Errorf("failed to write fragment %d: %w", id, err)
-		}
+		e.dispatcher.Transmit(seq, scratch.B)
 
 		// Keep track of the total number of bytes written to the connection.
 
-		written += n
+		written += len(scratch.B)
 	}
 
-	return written, nil
+	return written
 }
 
 func (e *Endpoint) RecvPacket(buf []byte) error {
-	if len(buf) == 0 {
-		return fmt.Errorf("packet is empty: %w", io.ErrUnexpectedEOF)
-	}
-
 	// If the first bit is set, process the packet as a fragmented packet. Otherwise, process it as a
 	// compact, non-fragmented packet.
 
@@ -202,7 +179,7 @@ func (e *Endpoint) recvFragmentedPacket(buf []byte) error {
 		return fmt.Errorf("failed to decode fragment header: %w", err)
 	}
 
-	if err := header.Validate(e.MaxFragments); err != nil {
+	if err := header.Validate(e.config.MaxFragments); err != nil {
 		return fmt.Errorf("got invalid fragment header: %w", err)
 	}
 
@@ -246,7 +223,7 @@ func (e *Endpoint) recvFragmentedPacket(buf []byte) error {
 		// fragment partitions.
 
 		entry.buf = e.pool.Get()
-		entry.buf.B = bytesutil.ExtendSlice(entry.buf.B[:0], int(MaxPacketHeaderSize+entry.total*e.FragmentSize))
+		entry.buf.B = bytesutil.ExtendSlice(entry.buf.B, int(MaxPacketHeaderSize+entry.total*e.config.FragmentSize))
 	}
 
 	// Assert that the total fragment count is what is expected, and that the specific fragment we received by its
@@ -275,10 +252,10 @@ func (e *Endpoint) recvFragmentedPacket(buf []byte) error {
 	}
 
 	if header.id == header.total {
-		entry.packetSize = uint(header.total)*e.FragmentSize + uint(len(buf))
+		entry.packetSize = uint(header.total)*e.config.FragmentSize + uint(len(buf))
 	}
 
-	copy(entry.buf.B[MaxPacketHeaderSize+uint(header.id)*e.FragmentSize:], buf)
+	copy(entry.buf.B[MaxPacketHeaderSize+uint(header.id)*e.config.FragmentSize:], buf)
 
 	// Increment the number of fragment partitions we have received. If we have received all the fragments, assemble
 	// it together in one packet and process it as a compact, non-fragmented packet.
@@ -320,10 +297,15 @@ func (e *Endpoint) recvCompactPacket(buf []byte) error {
 	if recv == nil {
 		return fmt.Errorf("packet received w/ sequence number %d is stale", header.seq)
 	}
+
+	// Process the packets contents now that it has successfully been received.
+
+	e.dispatcher.Process(header.seq, buf)
+
 	recv.Reset()
 
 	recv.time = e.time
-	recv.size = e.PacketHeaderSize + uint(len(buf))
+	recv.size = e.config.PacketHeaderSize + uint(len(buf))
 
 	// Mark new ACKs from our peer.
 
@@ -338,18 +320,24 @@ func (e *Endpoint) processACKs(ack uint16, bitset uint32) {
 			continue
 		}
 
-		sent := e.sent.Find(ack - i)
+		seq := ack - i
+
+		sent := e.sent.Find(seq)
 		if sent == nil || sent.acked {
 			continue
 		}
 
 		sent.acked = true
 
+		// Mark the packet sequence number as ACK'ed.
+
+		e.dispatcher.ACK(seq)
+
 		rtt := (e.time - sent.time) * 1000
 		if e.rtt == 0 && rtt > 0 || math.Abs(e.rtt-rtt) < 0.00001 {
 			e.rtt = rtt
 		} else {
-			e.rtt += (rtt - e.rtt) * e.RTTSmoothingFactor
+			e.rtt += (rtt - e.rtt) * e.config.RTTSmoothingFactor
 		}
 	}
 }
@@ -360,8 +348,8 @@ func (e *Endpoint) Update(time float64) {
 }
 
 func (e *Endpoint) updateStatistics() {
-	sentBase, sentSamples := (e.sent.buf.latest-uint16(cap(e.sent.entries))+1)+0xFFFF, e.SentPacketBufferSize/2
-	recvBase, recvSamples := (e.recv.buf.latest-uint16(cap(e.recv.entries))+1)+0xFFFF, e.RecvPacketBufferSize/2
+	sentBase, sentSamples := (e.sent.buf.latest-uint16(cap(e.sent.entries))+1)+0xFFFF, e.config.SentPacketBufferSize/2
+	recvBase, recvSamples := (e.recv.buf.latest-uint16(cap(e.recv.entries))+1)+0xFFFF, e.config.RecvPacketBufferSize/2
 
 	dropped := 0
 
@@ -414,7 +402,7 @@ func (e *Endpoint) updateStatistics() {
 	// Measure and smooth out packet loss.
 
 	if packetLoss := float64(dropped) / float64(sentSamples) * 100; math.Abs(e.packetLoss-packetLoss) > 0.00001 {
-		e.packetLoss += (packetLoss - e.packetLoss) * e.PacketLossSmoothingFactor
+		e.packetLoss += (packetLoss - e.packetLoss) * e.config.PacketLossSmoothingFactor
 	} else {
 		e.packetLoss = packetLoss
 	}
@@ -424,7 +412,7 @@ func (e *Endpoint) updateStatistics() {
 	if startWriting != math.MaxFloat64 && finishWriting != 0 {
 		sentBandwidthKbps := float64(written) / (finishWriting - startWriting) * 8 / 1000
 		if math.Abs(sentBandwidthKbps-sentBandwidthKbps) > 0.00001 {
-			e.sentBandwidthKbps += (sentBandwidthKbps - e.sentBandwidthKbps) * e.BandwidthSmoothingFactor
+			e.sentBandwidthKbps += (sentBandwidthKbps - e.sentBandwidthKbps) * e.config.BandwidthSmoothingFactor
 		} else {
 			e.sentBandwidthKbps = sentBandwidthKbps
 		}
@@ -436,7 +424,7 @@ func (e *Endpoint) updateStatistics() {
 		receivedBandwidthKbps := float64(received) / (finishReceiving - startReceiving) * 8 / 1000
 
 		if math.Abs(receivedBandwidthKbps-receivedBandwidthKbps) > 0.00001 {
-			e.receivedBandwidthKbps += (receivedBandwidthKbps - e.receivedBandwidthKbps) * e.BandwidthSmoothingFactor
+			e.receivedBandwidthKbps += (receivedBandwidthKbps - e.receivedBandwidthKbps) * e.config.BandwidthSmoothingFactor
 		} else {
 			e.receivedBandwidthKbps = receivedBandwidthKbps
 		}
@@ -448,15 +436,15 @@ func (e *Endpoint) updateStatistics() {
 		ackedBandwidthKbps := float64(acked) / (finishACKing - startACKing) * 8 / 1000
 
 		if math.Abs(ackedBandwidthKbps-ackedBandwidthKbps) > 0.00001 {
-			e.ackedBandwidthKbps += (ackedBandwidthKbps - e.ackedBandwidthKbps) * e.BandwidthSmoothingFactor
+			e.ackedBandwidthKbps += (ackedBandwidthKbps - e.ackedBandwidthKbps) * e.config.BandwidthSmoothingFactor
 		} else {
 			e.ackedBandwidthKbps = ackedBandwidthKbps
 		}
 	}
 }
 
-func (e *Endpoint) Bandwidth() (sent float64, received float64, acked float64) {
-	return e.sentBandwidthKbps, e.receivedBandwidthKbps, e.ackedBandwidthKbps
+func (e *Endpoint) Next() uint16 {
+	return e.seq
 }
 
 func (e *Endpoint) RTT() float64 {
@@ -465,4 +453,8 @@ func (e *Endpoint) RTT() float64 {
 
 func (e *Endpoint) PacketLoss() float64 {
 	return e.packetLoss
+}
+
+func (e *Endpoint) Bandwidth() (sent float64, received float64, acked float64) {
+	return e.sentBandwidthKbps, e.receivedBandwidthKbps, e.ackedBandwidthKbps
 }
