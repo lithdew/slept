@@ -83,6 +83,8 @@ func (c *Channel) Transmit(seq uint16, buf []byte) {
 
 	packet.time = c.endpoint.time
 	packet.buf = b
+
+	c.transmit(packet.buf.B)
 }
 
 func (c *Channel) Process(seq uint16, buf []byte) {
